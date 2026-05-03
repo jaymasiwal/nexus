@@ -13,19 +13,34 @@ export default function Home() {
   const [isDocumentLoaded, setIsDocumentLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle the file selection
+  // Handle the file selection and real API upload
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
       setIsUploading(true);
 
-      // TODO: We will connect this to the Next.js API to send to Pinecone next.
-      // For now, this simulates a 2-second upload process for the UI.
-      setTimeout(() => {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Upload failed");
+
         setIsUploading(false);
         setIsDocumentLoaded(true);
-      }, 2000);
+      } catch (error) {
+        console.error("Upload error:", error);
+        alert("Failed to upload document to Nexus.");
+        setIsUploading(false);
+        setFile(null);
+      }
     }
   };
 
