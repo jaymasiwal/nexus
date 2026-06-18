@@ -1,27 +1,27 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { UploadCloud, FileText, Send, Loader2, Bot, User } from "lucide-react";
 
 export default function Home() {
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  
-  // New states for file upload
-  const [file, setFile] = useState<File | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [isDocumentLoaded, setIsDocumentLoaded] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [message, setMessage] = useState("");
+  const [chatHistory, setChatHistory] = useState<{ role: "user" | "ai", text: string }[]>([]);
+  const [isChatting, setIsChatting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
-  // Handle the file selection and real API upload
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setIsUploading(true);
+  // Core function to handle arrays of files from either Drop or Click
+  const processFiles = async (files: File[]) => {
+    // Force strictly PDFs
+    const pdfFiles = files.filter(file => file.type === "application/pdf" || file.name.endsWith('.pdf'));
+    
+    if (pdfFiles.length === 0) return;
+    setIsUploading(true);
 
+    for (const file of pdfFiles) {
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      formData.append("file", file);
 
       try {
         const res = await fetch("/api/upload", {
@@ -29,29 +29,56 @@ export default function Home() {
           body: formData,
         });
 
-        const data = await res.json();
-
-        if (!res.ok) throw new Error(data.error || "Upload failed");
-
-        setIsUploading(false);
-        setIsDocumentLoaded(true);
+        if (!res.ok) throw new Error("Upload failed");
+        
+        // Append to UI without creating duplicate names
+        setUploadedFiles((prev) => {
+          if (prev.includes(file.name)) return prev;
+          return [...prev, file.name];
+        });
       } catch (error) {
-        console.error("Upload error:", error);
-        alert("Failed to upload document to Nexus.");
-        setIsUploading(false);
-        setFile(null);
+        console.error(`Failed to upload ${file.name}:`, error);
       }
+    }
+
+    setIsUploading(false);
+  };
+
+  // Drag & Drop Event Handlers
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processFiles(Array.from(e.dataTransfer.files));
     }
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processFiles(Array.from(e.target.files));
+    }
+    // Reset the input so the user can upload the same file again if they delete it
+    e.target.value = '';
+  };
 
-    const userMessage = input;
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
-    setInput("");
-    setIsLoading(true);
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!message.trim() || uploadedFiles.length === 0) return;
+
+    const userMessage = message;
+    setMessage("");
+    setChatHistory((prev) => [...prev, { role: "user", text: userMessage }]);
+    setIsChatting(true);
 
     try {
       const res = await fetch("/api/chat", {
@@ -61,109 +88,162 @@ export default function Home() {
       });
 
       const data = await res.json();
+      
+      // If the backend explicitly sends an error, throw it so it hits the catch block
       if (data.error) throw new Error(data.error);
 
-      setMessages((prev) => [...prev, { role: data.role, content: data.content }]);
-    } catch (error) {
-      console.error("Chat error:", error);
-      setMessages((prev) => [...prev, { role: "assistant", content: "❌ Error connecting to Nexus API." }]);
+      // We added data.content here to match your specific backend API structure
+      const aiResponse = data.content || data.text || data.answer || "No response generated.";
+      
+      setChatHistory((prev) => [...prev, { role: "ai", text: aiResponse }]);
+    } catch (error: any) {
+      console.error("Chat Error:", error);
+      setChatHistory((prev) => [...prev, { role: "ai", text: `❌ Error: ${error.message || "Failed to connect to Nexus API."}` }]);
     } finally {
-      setIsLoading(false);
+      setIsChatting(false);
     }
   };
 
   return (
-    <main className="flex flex-col h-screen bg-neutral-950 text-neutral-50 p-4 md:p-8">
-      <div className="max-w-3xl w-full mx-auto flex flex-col h-full border border-neutral-800 rounded-xl overflow-hidden shadow-2xl bg-neutral-900">
-        
-        {/* Header */}
-        <div className="p-4 border-b border-neutral-800 bg-neutral-950/50 flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">Nexus <span className="text-blue-500">Intelligence</span></h1>
-            <p className="text-sm text-neutral-400">
-              {isDocumentLoaded ? `Chatting with: ${file?.name}` : "Upload a document to begin"}
-            </p>
+    <div className="flex h-screen w-full bg-[#09090b] text-zinc-100 font-sans">
+      {/* SIDEBAR: Document Management */}
+      <div className="w-72 bg-[#121214] border-r border-zinc-800 flex flex-col">
+        <div className="p-6 border-b border-zinc-800">
+          <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+            <Bot className="w-6 h-6 text-blue-500" />
+            Nexus <span className="text-blue-500">AI</span>
+          </h1>
+          <p className="text-xs text-zinc-500 mt-1">Multi-Document Intelligence</p>
+        </div>
+
+        <div className="p-4 flex-1 overflow-y-auto">
+          <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+            Knowledge Base
+          </div>
+          
+          <div className="space-y-2">
+            {uploadedFiles.length === 0 ? (
+              <div className="text-sm text-zinc-600 italic px-2">No documents uploaded yet.</div>
+            ) : (
+              uploadedFiles.map((file, idx) => (
+                <div key={idx} className="flex items-center gap-3 bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
+                  <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span className="text-sm truncate text-zinc-300">{file}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
-        {/* Dynamic Center Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          
-          {/* UPLOAD STATE */}
-          {!isDocumentLoaded ? (
-            <div className="h-full flex flex-col items-center justify-center text-neutral-400 space-y-6">
-              <div className="text-center">
-                <h2 className="text-2xl font-semibold text-white mb-2">Upload your PDF</h2>
-                <p className="text-sm max-w-sm">Nexus will process your document and create a custom knowledge base.</p>
-              </div>
-              
-              <input 
-                type="file" 
-                accept=".pdf" 
-                className="hidden" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-              />
-              
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white px-6 py-3 rounded-xl font-medium transition-colors shadow-lg flex items-center gap-2"
-              >
-                {isUploading ? "Processing Document..." : "Select PDF File"}
-              </button>
-            </div>
-          ) : (
-            
-            /* CHAT STATE */
-            <>
-              {messages.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-neutral-500">
-                  <p>Document loaded successfully.</p>
-                  <p>Ask a question to begin.</p>
-                </div>
-              )}
-              {messages.map((msg, index) => (
-                <div key={index} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[80%] rounded-lg p-3 ${
-                    msg.role === "user" ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-200"
-                  }`}>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                  </div>
-                </div>
-              ))}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-neutral-800 text-neutral-400 rounded-lg p-3 text-sm animate-pulse">
-                    Nexus is thinking...
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Input Area (Disabled if no document is loaded) */}
-        <div className="p-4 border-t border-neutral-800 bg-neutral-950/50">
-          <form onSubmit={sendMessage} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={isDocumentLoaded ? "Ask a question..." : "Upload a document first..."}
-              disabled={!isDocumentLoaded}
-              className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-neutral-400 disabled:opacity-50 disabled:cursor-not-allowed"
+        {/* Drag & Drop Upload Area */}
+        <div 
+          className="p-4 border-t border-zinc-800"
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+        >
+          <label className={`flex flex-col items-center justify-center gap-2 w-full bg-zinc-800 hover:bg-zinc-700 text-white py-6 px-4 rounded-xl cursor-pointer transition border-2 border-dashed ${isDragging ? 'border-blue-500 bg-blue-500/10' : 'border-zinc-700'}`}>
+            {isUploading ? (
+              <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+            ) : (
+              <UploadCloud className={`w-6 h-6 ${isDragging ? 'text-blue-500' : 'text-zinc-400'}`} />
+            )}
+            <span className="text-sm font-medium text-center">
+              {isUploading ? "Uploading..." : isDragging ? "Drop PDFs here" : "Click or drag PDFs here"}
+            </span>
+            <input 
+              type="file" 
+              accept=".pdf" 
+              multiple 
+              className="hidden" 
+              onChange={handleFileChange} 
+              disabled={isUploading}
             />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim() || !isDocumentLoaded}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            >
-              Send
-            </button>
-          </form>
+          </label>
         </div>
       </div>
-    </main>
+
+      {/* MAIN CHAT AREA */}
+      <div className="flex-1 flex flex-col relative">
+        {uploadedFiles.length === 0 ? (
+          <div 
+            className="flex-1 flex flex-col items-center justify-center text-center px-4 transition"
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+          >
+            <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-6 border transition-all ${isDragging ? 'bg-blue-500/20 border-blue-500 scale-110' : 'bg-blue-500/10 border-blue-500/20'}`}>
+              <UploadCloud className={`w-10 h-10 ${isDragging ? 'text-blue-400' : 'text-blue-500'}`} />
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-3">Build Your Knowledge Base</h2>
+            <p className="text-zinc-400 max-w-md text-sm leading-relaxed">
+              Drag and drop multiple PDF documents anywhere on this screen. Nexus will index them instantly, allowing you to synthesize and extract information across all your files simultaneously.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
+              {chatHistory.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-zinc-500">
+                  <Bot className="w-12 h-12 mb-4 opacity-20" />
+                  <p>Documents loaded. What would you like to know?</p>
+                </div>
+              ) : (
+                chatHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex gap-4 max-w-3xl mx-auto ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === "user" ? "bg-blue-600" : "bg-zinc-800 border border-zinc-700"}`}>
+                      {msg.role === "user" ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-blue-400" />}
+                    </div>
+                    <div className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.role === "user" ? "bg-blue-600 text-white rounded-tr-sm" : "bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-sm"}`}>
+                      {msg.text}
+                    </div>
+                  </div>
+                ))
+              )}
+              {isChatting && (
+                <div className="flex gap-4 max-w-3xl mx-auto">
+                   <div className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                      <Bot className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-tl-sm flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Thinking...
+                    </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input Area */}
+            <div className="p-6 bg-gradient-to-t from-[#09090b] pt-10">
+              <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto relative flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-2 focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700 transition-all shadow-lg">
+                <textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="Ask a question across all documents..."
+                  className="w-full bg-transparent text-white placeholder-zinc-500 text-sm p-3 outline-none resize-none max-h-32 min-h-[44px]"
+                  rows={1}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage(e);
+                    }
+                  }}
+                />
+                <button 
+                  type="submit" 
+                  disabled={!message.trim() || isChatting}
+                  className="bg-white text-black p-2.5 rounded-xl hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition shrink-0 m-1"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+              <div className="text-center mt-3 text-xs text-zinc-600">
+                Nexus AI synthesizes information from your uploaded context.
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
