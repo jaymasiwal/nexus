@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       messages: [{ role: "user", content: message }],
     });
 
-    return NextResponse.json({ role: "assistant", content: chatResult.message.content });
+   return NextResponse.json({ role: "assistant", content: chatResult.message?.content || "No response generated." });
     
   } catch (error) {
     console.error("Chat API Error:", error);
