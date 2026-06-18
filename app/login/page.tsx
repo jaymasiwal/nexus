@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation";
 
 export default function AuthPage() {
   const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"email" | "otp">("email");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -17,40 +16,40 @@ export default function AuthPage() {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
   );
 
-  const handleSendOtp = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithOtp({ email });
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    } else {
-      setStep("otp");
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-
-    const { error } = await supabase.auth.verifyOtp({
+    // First, attempt to log in
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
-      token: otp,
-      type: "email"
+      password,
     });
 
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    } else {
-      router.push("/");
-      router.refresh();
+    if (signInError) {
+      // If the user doesn't exist, create the account instantly
+      if (signInError.message.includes("Invalid login credentials")) {
+        const { error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+
+        if (signUpError) {
+          setError(signUpError.message);
+          setLoading(false);
+          return;
+        }
+      } else {
+        setError(signInError.message);
+        setLoading(false);
+        return;
+      }
     }
+
+    // Success - route to main app
+    router.push("/");
+    router.refresh();
   };
 
   return (
@@ -61,7 +60,7 @@ export default function AuthPage() {
             Access Nexus
           </h2>
           <p className="mt-2 text-center text-sm text-zinc-400">
-            {step === "email" ? "Enter your email to receive a 6-digit code" : "Enter the 6-digit code sent to your email"}
+            Enter your email and a password to continue
           </p>
         </div>
 
@@ -71,8 +70,8 @@ export default function AuthPage() {
           </div>
         )}
 
-        {step === "email" ? (
-          <form className="mt-8 space-y-6" onSubmit={handleSendOtp}>
+        <form className="mt-8 space-y-6" onSubmit={handleAuth}>
+          <div className="space-y-4">
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                 Email address
@@ -86,46 +85,30 @@ export default function AuthPage() {
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
-
-            <button
-              type="submit"
-              disabled={loading || !email}
-              className="group relative flex w-full justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50 transition"
-            >
-              {loading ? "Sending Code..." : "Send OTP"}
-            </button>
-          </form>
-        ) : (
-          <form className="mt-8 space-y-6" onSubmit={handleVerifyOtp}>
             <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">6-Digit Code</label>
+              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                Password
+              </label>
               <input
-                type="text"
+                type="password"
                 required
-                className="mt-1 block w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none text-sm tracking-widest text-center text-lg"
-                placeholder="123456"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
+                minLength={6}
+                className="mt-1 block w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-white placeholder-zinc-500 focus:border-blue-500 focus:outline-none text-sm"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+          </div>
 
-            <button
-              type="submit"
-              disabled={loading || otp.length < 6}
-              className="group relative flex w-full justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50 transition"
-            >
-              {loading ? "Verifying..." : "Verify & Login"}
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => setStep("email")}
-              className="w-full text-center text-sm text-zinc-400 hover:text-white transition"
-            >
-              Back
-            </button>
-          </form>
-        )}
+          <button
+            type="submit"
+            disabled={loading || !email || password.length < 6}
+            className="group relative flex w-full justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50 transition"
+          >
+            {loading ? "Authenticating..." : "Continue"}
+          </button>
+        </form>
       </div>
     </div>
   );
